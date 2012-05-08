@@ -21,6 +21,13 @@ Puppet::Type.newtype(:flume_node) do
     desc "master hostname"
   end
 
+  newparam(:map_target) do
+    desc "mapping target"
+    defaultto {
+      nil
+    }
+  end
+
   newproperty(:ensure) do
     desc "Whether the resource is in sync or not."
 
@@ -32,12 +39,26 @@ Puppet::Type.newtype(:flume_node) do
     end
 
     newvalue :outofsync do
-      # TODO
+      master = resource[:master]
+      name = resource[:name]
+      unconf = <<-EOF
+connect #{master}
+exec unconfig #{name}
+exec decommission #{name}
+exec purge #{name}
+EOF
+      Tempfile.open("flume-") do |tempfile|
+        tempfile.write(unconf)
+        tempfile.close
+        `cat #{tempfile.path} | flume shell -q 2>/dev/null`
+      end
     end
+
     newvalue :insync do
 
       master = resource[:master]
       name = resource[:name]
+      map_target = resource[:map_target]
       source = resource[:source]
       sink = resource[:sink]
       if sink.kind_of? Hash then
@@ -54,11 +75,22 @@ exec unconfig #{name}
 exec decommission #{name}
 exec purge #{name}
 exec config #{name} '#{source}' '#{sink}'
+EOF
+      unless map_target == nil
+        mapping = <<-EOF
+exec map #{map_target} #{name}
+EOF
+      end
+      refresh = <<-EOF
 exec refresh #{name}
 EOF
 
       Tempfile.open("flume-") do |tempfile|
         tempfile.write(conf)
+        if defined? mapping
+          tempfile.write(mapping)
+        end
+        tempfile.write(refresh)
         tempfile.close
         `cat #{tempfile.path} | flume shell -q 2>/dev/null`
       end
